@@ -1,0 +1,11 @@
+﻿################################################################################
+# This .gitignore file was automatically created by Microsoft(R) Visual Studio.
+################################################################################
+
+/.vs
+/MondoCore.Azure.Storage/bin
+/MondoCore.Azure.Storage/obj
+/MondoCore.Azure.Storage/.vs
+/MondoCore.Azure.Storage.FunctionalTests/bin
+/MondoCore.Azure.Storage.FunctionalTests/obj
+/MondoCore.Azure.Storage.FunctionalTests/localhost.json
