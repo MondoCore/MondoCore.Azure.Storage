@@ -40,6 +40,7 @@ namespace MondoCore.Azure.Storage
     /// <summary>
     /// Azure blob storage
     /// </summary>
+    [Obsolete("Use AzurePageBlobStorage<T>")]
     public class AzurePageBlobStorage : BaseBlobStorage
     {
         internal const int PageSize = 512;
@@ -67,8 +68,8 @@ namespace MondoCore.Azure.Storage
         protected internal override async Task<Stream> OpenWrite(BlobBaseClient client)
         {
             // ??? need to make PageBlobWriteStream,Output be a prop so I can reset with a new call to OpenWriteAsync after resizing
-            var sizeable = new PageBlobSizeable(client as PageBlobClient);
-            var storStrm = await (client as PageBlobClient).OpenWriteAsync(true, 0L, new PageBlobOpenWriteOptions { Size = PageSize }).ConfigureAwait(false);
+            var sizeable = new PageBlobSizeable((client as PageBlobClient)!);
+            var storStrm = await ((client as PageBlobClient)!).OpenWriteAsync(true, 0L, new PageBlobOpenWriteOptions { Size = PageSize }).ConfigureAwait(false);
             var stream   = new PageBlobWriteStream(storStrm, sizeable);
 
             sizeable.Stream = stream;
@@ -85,7 +86,7 @@ namespace MondoCore.Azure.Storage
         {
             var len          = contents.Length;
             var adjustedSize = (int)(Math.Ceiling((double)len / (double)PageSize) * PageSize);
-            var client       = (await GetBlobClient(id).ConfigureAwait(false)) as PageBlobClient;
+            var client       = ((await GetBlobClient(id).ConfigureAwait(false)) as PageBlobClient)!;
 
             using(var strm = await client.OpenWriteAsync(false, 0L, new PageBlobOpenWriteOptions { Size = adjustedSize } ).ConfigureAwait(false))
             {
@@ -114,7 +115,7 @@ namespace MondoCore.Azure.Storage
 
         protected override async Task<BlobBaseClient> GetBlobClient(string blobName, bool createIfNotExists = false)
         {
-            PageBlobClient blob = null;
+            PageBlobClient? blob = null;
             
             if(this.Uri != null)
             { 
@@ -123,7 +124,7 @@ namespace MondoCore.Azure.Storage
                 blob = new PageBlobClient(pageUri, this.Credential);
             }
             else
-                blob = new PageBlobClient(this.ConnectionString, this.ContainerName, Path.Combine(this.FolderName, blobName));
+                blob = new PageBlobClient(this.ConnectionString, this.ContainerName, Path.Combine(this.FolderName!, blobName));
 
             if(createIfNotExists)
                 await blob.CreateIfNotExistsAsync(1024).ConfigureAwait(false);
@@ -144,38 +145,31 @@ namespace MondoCore.Azure.Storage
             }
 
             public long Size => _size;
-            internal PageBlobWriteStream Stream { get; set; }
+            internal PageBlobWriteStream? Stream { get; set; }
 
             // total length  = 18874368
             // last position = 16777216
             // last write    = 2097152
             public async Task ResizeAsync(long newSize)
             {
-                try
-                { 
-                   var position = this.Stream.Output.Position;
+                var position = this.Stream!.Output.Position;
 
-                   this.Stream.Output.Dispose();
+                this.Stream.Output.Dispose();
 
-                    await _client.ResizeAsync(newSize).ConfigureAwait(false);
+                await _client.ResizeAsync(newSize).ConfigureAwait(false);
 
-                    _size = newSize;
+                _size = newSize;
 
-                    var storStrm = await _client.OpenWriteAsync(false, position).ConfigureAwait(false);
+                var storStrm = await _client.OpenWriteAsync(false, position).ConfigureAwait(false);
 
-                    this.Stream.Output = storStrm;
-                }
-                catch(Exception ex)
-                {
-                    throw;
-                }
+                this.Stream.Output = storStrm;
 
                 return;
             }
 
             public void Resize(long newSize)
             {
-                var position = this.Stream.Output.Position;
+                var position = this.Stream!.Output.Position;
 
                this.Stream.Output.Dispose();
 

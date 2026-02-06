@@ -197,9 +197,9 @@ namespace MondoCore.Azure.Storage
         /// <returns>A collection of the blob ids/paths</returns>
         public async Task Enumerate(string filter, Func<IBlob, Task> fnEach, bool asynchronous = true)
         {
-            var        container = this.ContainerClient;
-            var        pages     = container.GetBlobs(AzureBlobs.Models.BlobTraits.Metadata).AsPages();
-            List<Task> tasks     = asynchronous ? new List<Task>() : null;
+            var         container = this.ContainerClient;
+            var         pages     = container.GetBlobs().AsPages();
+            List<Task>? tasks     = asynchronous ? new List<Task>() : null;
 
             foreach(var page in pages)
             {
@@ -211,12 +211,12 @@ namespace MondoCore.Azure.Storage
                     { 
                         var ablob = new AzureBlob(blob);
 
-                        ablob.Name = ablob.Name.Substring(this.FolderName.Length);
+                        ablob.Name = ablob.Name.Substring(this.FolderName!.Length);
 
                         var task = fnEach(ablob);
 
                         if(asynchronous)
-                            tasks.Add(task);
+                            tasks!.Add(task);
                         else
                             await task.ConfigureAwait(false);
                     }
@@ -224,7 +224,7 @@ namespace MondoCore.Azure.Storage
             }
 
             if(asynchronous)
-                await Task.WhenAll(tasks).ConfigureAwait(false);
+                await Task.WhenAll(tasks!).ConfigureAwait(false);
 
             return;
         }
@@ -232,7 +232,7 @@ namespace MondoCore.Azure.Storage
         public async IAsyncEnumerable<IBlob> AsAsyncEnumerable()
         {
             var        container = this.ContainerClient;
-            var        pages     = container.GetBlobsAsync(AzureBlobs.Models.BlobTraits.Metadata).AsPages();
+            var        pages     = container.GetBlobsAsync().AsPages();
 
             await foreach(var page in pages)
             {
@@ -244,13 +244,34 @@ namespace MondoCore.Azure.Storage
                     { 
                         var ablob = new AzureBlob(blob);
 
-                        ablob.Name = ablob.Name.Substring(this.FolderName.Length);
+                        ablob.Name = ablob.Name.Substring(this.FolderName!.Length);
 
                         yield return ablob;
                     }
                 }
             }
 
+        }
+
+        public Task<IDisposable> Lock(string id)
+        {
+            throw new NotImplementedException();
+        }
+
+        public async Task<bool> Exists(string id)
+        {
+            var blob = await GetBlobClient(id).ConfigureAwait(false);
+
+            return await blob.ExistsAsync();
+        }
+
+        #endregion
+
+        #region IDisposable
+
+        public void Dispose()
+        {
+            // Nothing to do
         }
 
         #endregion
@@ -269,26 +290,6 @@ namespace MondoCore.Azure.Storage
         }
 
         protected abstract Task<BlobBaseClient> GetBlobClient(string blobName, bool createIfNotExists = false);
-
-        private class AzureBlob : IBlob
-        { 
-            private readonly BlobItem _blob;
-
-            internal AzureBlob(BlobItem blob)
-            {
-                _blob = blob;
-                this.Name = blob.Name;
-            }
-
-            public string                       Name        { get; set; }
-            public bool                         Deleted     => _blob.Deleted;
-            public bool                         Enabled     => true;
-            public string                       Version     => "";
-            public string                       ContentType => "";
-            public DateTimeOffset?              Expires     => null;
-            public IDictionary<string, string>? Metadata    => _blob.Metadata;
-            public IDictionary<string, string>? Tags        => _blob.Tags;
-        }
 
         #endregion
     }

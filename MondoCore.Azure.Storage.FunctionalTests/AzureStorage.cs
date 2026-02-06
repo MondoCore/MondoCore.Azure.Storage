@@ -71,32 +71,19 @@ namespace MondoCore.Azure.Storage.FunctionalTests
         }
 
         [TestMethod]
-        [ExpectedException(typeof(FileNotFoundException))]
         public async Task AzureStorage_Get_notfound()
         {
             var store = CreateStorage();
 
-            await store.Delete("bob");
-            await store.Put("bob", "fred");
-
-            Assert.AreEqual("fred", await store.Get("george"));
-
-            await store.Delete("bob");
+            await Assert.ThrowsAsync<FileNotFoundException>(async ()=> await store.Get("george"));
         }
 
         [TestMethod]
-        [ExpectedException(typeof(FileNotFoundException))]
         public async Task AzureStorage_GetBytes_notfound()
         {
             var store = CreateStorage();
-            var encoding = UTF8Encoding.UTF8;
 
-            await store.Delete("bob");
-            await store.Put("bob", "fred");
-
-            Assert.AreEqual("fred", encoding.GetString(await store.GetBytes("george")));
-
-            await store.Delete("bob");
+            await Assert.ThrowsAsync<FileNotFoundException>(async ()=> await store.GetBytes("george"));
         }
 
         [TestMethod]
@@ -137,7 +124,6 @@ namespace MondoCore.Azure.Storage.FunctionalTests
         }
 
         [TestMethod]
-        [ExpectedException(typeof(FileNotFoundException))]
         public async Task AzureStorage_Delete()
         {
             var store = CreateStorage();
@@ -150,7 +136,8 @@ namespace MondoCore.Azure.Storage.FunctionalTests
             await store.Delete("bob");
 
             await Task.Delay(100);
-            Assert.AreEqual("fred", await store.Get("bob"));
+
+            Assert.IsFalse(await store.Exists("bob"));
         }
 
         [TestMethod]
@@ -223,10 +210,10 @@ namespace MondoCore.Azure.Storage.FunctionalTests
 
             Assert.AreEqual(4, result.Count());
 
-            Assert.IsTrue(result.Contains("docs/bio.doc"));
-            Assert.IsTrue(result.Contains("photos/photo.jpg"));
-            Assert.IsTrue(result.Contains("resumes/resume.pdf"));
-            Assert.IsTrue(result.Contains("stuff/portfolio.pdf"));
+            Assert.Contains("docs/bio.doc", result);
+            Assert.Contains("photos/photo.jpg", result);
+            Assert.Contains("resumes/resume.pdf", result);
+            Assert.Contains("stuff/portfolio.pdf", result);
 
             await store.Delete("docs/bio.doc");
             await store.Delete("photos\\photo.jpg");
@@ -258,10 +245,10 @@ namespace MondoCore.Azure.Storage.FunctionalTests
 
             Assert.AreEqual(4, result.Count());
 
-            Assert.IsTrue(result.Contains("docs/bio.doc"));
-            Assert.IsTrue(result.Contains("photos/photo.jpg"));
-            Assert.IsTrue(result.Contains("resumes/resume.pdf"));
-            Assert.IsTrue(result.Contains("stuff/portfolio.pdf"));
+            Assert.Contains("docs/bio.doc", result);
+            Assert.Contains("photos/photo.jpg", result);
+            Assert.Contains("resumes/resume.pdf", result);
+            Assert.Contains("stuff/portfolio.pdf", result);
 
             await store.Delete("docs/bio.doc");
             await store.Delete("photos/photo.jpg");
@@ -293,10 +280,10 @@ namespace MondoCore.Azure.Storage.FunctionalTests
 
             Assert.AreEqual(4, result.Count());
 
-            Assert.IsTrue(result.Contains("docs/bio.doc"));
-            Assert.IsTrue(result.Contains("photos/photo.jpg"));
-            Assert.IsTrue(result.Contains("resumes/resume.pdf"));
-            Assert.IsTrue(result.Contains("stuff/portfolio.pdf"));
+            Assert.Contains("docs/bio.doc", result);
+            Assert.Contains("photos/photo.jpg", result);
+            Assert.Contains("resumes/resume.pdf", result);;
+            Assert.Contains("stuff/portfolio.pdf", result);
 
             await store.Delete("docs/bio.doc");
             await store.Delete("photos\\photo.jpg");
