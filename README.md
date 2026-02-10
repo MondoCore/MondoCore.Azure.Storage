@@ -1,34 +1,26 @@
 # MondoCore.Azure.Storage
-  Blob storage in Azure Storage
+  Classes for accessing blob storage in an Azure storage account
  
 <br>
 
+## Classes
 
-#### AzureStorage
+<br/>
 
-```
-using MondoCore.Azure.Storage;
+### AzureBlobStorage\<T\>
+> Class to access Azure blob storage. See [IBlobStore\<T\>](https://github.com/MondoCore/MondoCore.Common) for interfaces and usage.
 
-public static class Example
-{
-    public static async Task DoWork(string connectionString, string containerName)
-    {
-        // Create an instance of AzureStorage with a connection string and the container name.
-        //   The container name can also optionally have a folder path
-        IBlobStore store = new AzureStorage(connectionString, containerName);
+---
+### AzureAppendBlobStorage\<T\>
+> Class for blob storage in Azure append blob storage. See [IBlobStore\<T\>](https://github.com/MondoCore/MondoCore.Common) for interfaces and usage.     
 
-        string content = "Bob's your uncle";
+---
+### AzurePageBlobStorage\<T\>
+> Class for page blob storage. See [IBlobStore\<T\>](https://github.com/MondoCore/MondoCore.Common) for interfaces and usage. 
 
-        await store.Put("bob", content);
+<br/>
 
-        var result = store.Get("bob");
-
-        Console.Write(result == content ? "result == content" : "result != content")
-    }
-}
-```
-
-```
+---
 License
 ----
 

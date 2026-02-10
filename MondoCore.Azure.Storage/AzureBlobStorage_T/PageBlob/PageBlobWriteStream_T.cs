@@ -3,14 +3,14 @@
  *    The MondoCore Libraries  							                    
  *                                                                          
  *        Namespace: MondoCore.Azure.Storage				            
- *             File: PageBlobWriteStream.cs			 		    		    
- *        Class(es): PageBlobWriteStream				           		        
- *          Purpose: Base class for blob storage accounts in Azure Storage                           
+ *             File: PageBlobWriteStream_T.cs			 		    		    
+ *        Class(es): PageBlobWriteStream<T>				           		        
+ *          Purpose: Stream for writing to page blobs                       
  *                                                                          
  *  Original Author: Jim Lightfoot                                          
- *    Creation Date: 5 Jan 2021                                             
+ *    Creation Date: 7 Feb 2026                                             
  *                                                                          
- *   Copyright (c) 2021-2025 - Jim Lightfoot, All rights reserved                
+ *   Copyright (c) 2026 - Jim Lightfoot, All rights reserved                
  *                                                                          
  *  Licensed under the MIT license:                                         
  *    http://www.opensource.org/licenses/mit-license.php                    
@@ -18,40 +18,44 @@
  ****************************************************************************/
 
 using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Runtime.CompilerServices;
-
-using MondoCore.Common;
 
 [assembly: InternalsVisibleTo("MondoCore.Azure.Storage.FunctionalTests")]
 
 namespace MondoCore.Azure.Storage
 {
+    internal interface ISizeable<TS>
+    {
+        long Size { get; }
+        Task ResizeAsync(long newSize, string? leaseId, CancellationToken cancellationToken);
+    }
+
     /****************************************************************************/
     /****************************************************************************/
     /// <summary>
     /// Writes to a secondary stream in chunks
     /// </summary>
-    internal class PageBlobWriteStream : Stream
+    internal class PageBlobWriteStream<T> : Stream
     {
-        private readonly ISizeable _sizeable;
-        private long               _length   = 0L;
-        private long               _position = 0L;
-        private readonly byte[]    _buffer;
-        private readonly int       _bufferSize;
-        private int                _bufferPosition = 0;
+        private readonly ISizeable<T> _sizeable;
+        private long                   _length   = 0L;
+        private long                   _position = 0L;
+        private readonly byte[]        _buffer;
+        private readonly int           _bufferSize;
+        private int                    _bufferPosition = 0;
+        private string?                _leaseId;
 
         /****************************************************************************/
-        internal PageBlobWriteStream(Stream output, ISizeable sizeable, int bufferSize = 4096 * 1024)
+        internal PageBlobWriteStream(Stream output, ISizeable<T> sizeable, string? leaseId, int bufferSize = 4096 * 1024)
         {
             this.Output = output;
             _sizeable   = sizeable;
-            _bufferSize = Math.Max(AzurePageBlobStorage.PageSize, (int)(Math.Floor((double)bufferSize / AzurePageBlobStorage.PageSize) * AzurePageBlobStorage.PageSize));
+            _bufferSize = Math.Max(AzurePageBlobStorageWriter<T>.PageSize, (int)(Math.Floor((double)bufferSize / AzurePageBlobStorageWriter<T>.PageSize) * AzurePageBlobStorageWriter<T>.PageSize));
             _buffer     = new byte[_bufferSize];
+            _leaseId    = leaseId;
         }
 
         public override long Position   { get => _position; set => throw new NotSupportedException(); }
@@ -84,7 +88,7 @@ namespace MondoCore.Azure.Storage
                 _position += count;
                 _length += count;
 
-                await CheckFlushBufferAsync().ConfigureAwait(false);
+                await CheckFlushBufferAsync(cancellationToken).ConfigureAwait(false);
 
                 return;
             }
@@ -101,7 +105,7 @@ namespace MondoCore.Azure.Storage
                 _length += thisCopy;
                 written += thisCopy;
 
-                await CheckFlushBufferAsync().ConfigureAwait(false);
+                await CheckFlushBufferAsync(cancellationToken).ConfigureAwait(false);
             }
 
             return;
@@ -114,6 +118,11 @@ namespace MondoCore.Azure.Storage
 
         public override void Flush()
         {
+            throw new NotImplementedException();
+        }
+
+        public override async Task FlushAsync(CancellationToken cancellationToken)
+        {
             if(_bufferPosition > 0)
             {
                 var bytesToWrite = AdjustedSize(_bufferPosition);
@@ -125,9 +134,9 @@ namespace MondoCore.Azure.Storage
                 }
 
                 if(_sizeable.Size < _length)
-                    _sizeable.Resize(AdjustedSize(_length));
+                    await _sizeable.ResizeAsync(AdjustedSize(_length), _leaseId, cancellationToken);
 
-                this.Output!.Write(_buffer, 0, (int)bytesToWrite);
+                await this.Output!.WriteAsync(_buffer, 0, (int)bytesToWrite, cancellationToken);
 
                 _bufferPosition = 0;
             }
@@ -135,20 +144,18 @@ namespace MondoCore.Azure.Storage
 
         private long AdjustedSize(long size)
         {
-            return (long)(Math.Ceiling((double)size / AzurePageBlobStorage.PageSize)) * AzurePageBlobStorage.PageSize;
+            return (long)(Math.Ceiling((double)size / AzurePageBlobStorageWriter<T>.PageSize)) * AzurePageBlobStorageWriter<T>.PageSize;
         }
 
-        protected override void Dispose(bool disposing)
+        public override async ValueTask DisposeAsync()
         {
-            if(disposing)
-            { 
-                Flush();
+            await FlushAsync();
 
-                this.Output!.Close();
-                this.Output = null;
-            }
+            await this.Output!.DisposeAsync();
 
-            base.Dispose(disposing);
+            this.Output = null;
+  
+            await base.DisposeAsync();
         }
 
         #endregion
@@ -174,18 +181,18 @@ namespace MondoCore.Azure.Storage
 
         #region Private
 
-        private async Task CheckFlushBufferAsync()
+        private async Task CheckFlushBufferAsync(CancellationToken cancellationToken)
         {
             if(_bufferPosition >= _bufferSize)
             {
                 var pos = this.Output!.Position;
 
                 if(_sizeable.Size < _length)
-                    await _sizeable.ResizeAsync(AdjustedSize(_length)).ConfigureAwait(false);
+                    await _sizeable.ResizeAsync(AdjustedSize(_length), _leaseId, cancellationToken).ConfigureAwait(false);
 
                  var pos2 = this.Output.Position;
 
-                 await this.Output.WriteAsync(_buffer, 0, _bufferSize).ConfigureAwait(false);
+                 await this.Output.WriteAsync(_buffer, 0, _bufferSize, cancellationToken).ConfigureAwait(false);
 
                 _bufferPosition = 0;
             }

@@ -18,7 +18,6 @@ namespace MondoCore.Azure.Storage.FunctionalTests
     public class PageBlobWriteStreamTests : ISizeable
     {
         [TestMethod]
-        [ExpectedException(typeof(ArgumentNullException))]
         public async Task PageBlobWriteStream_WriteAsync_null()
         {
             using(var output = new MemoryStream())
@@ -29,13 +28,12 @@ namespace MondoCore.Azure.Storage.FunctionalTests
                 { 
                     var bytes = UTF8Encoding.UTF8.GetBytes(val);
 
-                    await strm.WriteAsync(null, 0, bytes.Length);
+                    await Assert.ThrowsAsync<ArgumentNullException>(async ()=> await strm.WriteAsync(null, 0, bytes.Length));
                 }
             }
         }
 
         [TestMethod]
-        [ExpectedException(typeof(ArgumentOutOfRangeException))]
         public async Task PageBlobWriteStream_WriteAsync_outofrange()
         {
             using(var output = new MemoryStream())
@@ -46,13 +44,12 @@ namespace MondoCore.Azure.Storage.FunctionalTests
                 { 
                     var bytes = UTF8Encoding.UTF8.GetBytes(val);
 
-                    await strm.WriteAsync(bytes, bytes.Length, bytes.Length);
+                    await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async ()=> await strm.WriteAsync(bytes, bytes.Length, bytes.Length));
                 }
             }
         }
 
         [TestMethod]
-        [ExpectedException(typeof(ArgumentOutOfRangeException))]
         public async Task PageBlobWriteStream_WriteAsync_count()
         {
             using(var output = new MemoryStream())
@@ -63,7 +60,7 @@ namespace MondoCore.Azure.Storage.FunctionalTests
                 { 
                     var bytes = UTF8Encoding.UTF8.GetBytes(val);
 
-                    await strm.WriteAsync(bytes, 130, 98);
+                    await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async ()=> await strm.WriteAsync(bytes, 130, 98));
                 }
             }
         }

@@ -5,12 +5,12 @@
  *        Namespace: MondoCore.Azure.Storage				            
  *             File: AzureStorage.cs			 		    		    
  *        Class(es): AzureStorage				           		        
- *          Purpose: Class for blob storage in Azure Storge                           
+ *          Purpose: Class for blob storage in Azure Storage                           
  *                                                                          
  *  Original Author: Jim Lightfoot                                          
- *    Creation Date: 15 Aug 2020                                             
+ *    Creation Date: 3 Feb 2026                                             
  *                                                                          
- *   Copyright (c) 2020-2025 - Jim Lightfoot, All rights reserved                
+ *   Copyright (c) 2026 - Jim Lightfoot, All rights reserved                
  *                                                                          
  *  Licensed under the MIT license:                                         
  *    http://www.opensource.org/licenses/mit-license.php                    
@@ -33,54 +33,36 @@ namespace MondoCore.Azure.Storage
     /****************************************************************************/
     /****************************************************************************/
     /// <summary>
-    /// Azure blob storage
+    /// Class to access Azure blob storage
     /// </summary>
-    [Obsolete("Use AzureBlobStorage<T>")]
-    public class AzureStorage : BaseBlobStorage
+    public class AzureBlobStorage<T> : BaseBlobStorage<T>
     {
-        public AzureStorage(string connectionString, string blobContainerName) : base(connectionString, blobContainerName)
+        public AzureBlobStorage(string connectionString, string blobContainerName) : base(connectionString, blobContainerName)
         {
         }
 
-        public AzureStorage(Uri uri, TokenCredential credential, string path) : base(uri, credential, path)
+        public AzureBlobStorage(Uri uri, TokenCredential credential, string path) : base(uri, credential, path)
         {
         }
 
-        public AzureStorage(Uri uri, string tenantId, string clientId, string secret, string path) : base(uri, new ClientSecretCredential(tenantId, clientId, secret), path)
+        #region BaseBlobStorage
+
+        public override IBlobStoreReader<T> Reader => new AzureBlobStorageReader<T>(this);
+
+        /// <inheritdoc/>
+        public override IBlobStoreWriter<T> Writer => new AzureBlobStorageWriter<T>(this);
+
+        /// <inheritdoc/>
+        public override ValueTask DisposeAsync()
         {
-        }
-
-        public AzureStorage(Uri uri, string path) : this(uri, new ManagedIdentityCredential(), path)
-        {
-        }
-
-        #region IBlobStore
-
-        /// <summary>
-        /// Opens a writable stream to a blob with the given id/path 
-        /// </summary>
-        /// <param name="id">An identifier for the blob. This could be a path.</param>
-        /// <returns>A writable stream to write to the blob</returns>
-        protected internal override Task<Stream> OpenWrite(BlobBaseClient client)
-        {
-            throw new NotSupportedException("Cannot open a write stream on this type of Azure Blob Storage. Use AzurePageBlobStorage.");
-        }
-
-        /// <summary>
-        /// Puts the string into the blob storage
-        /// </summary>
-        /// <param name="id">An identifier for the blob. This could be a path.</param>
-        /// <param name="contents">The contents to store</param>
-        public override async Task Put(string id, Stream contents)
-        {
-            var blob = (await GetBlobClient(id).ConfigureAwait(false)) as BlobClient;
-
-            await blob!.UploadAsync(contents).ConfigureAwait(false);
+            return ValueTask.CompletedTask;
         }
 
         #endregion
+       
+        #region Internal
 
-        protected override Task<BlobBaseClient> GetBlobClient(string blobName, bool createIfNotExists = false)
+        internal override Task<BlobBaseClient> GetBlobClient(string blobName, bool createIfNotExists = false)
         { 
             BlobClient? blob = null;
 
@@ -95,5 +77,7 @@ namespace MondoCore.Azure.Storage
 
             return Task.FromResult(blob as BlobBaseClient);
         }
+
+        #endregion
     }
 }

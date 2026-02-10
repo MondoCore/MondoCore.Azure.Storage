@@ -78,35 +78,11 @@ namespace MondoCore.Azure.Storage.FunctionalTests
         }
 
         [TestMethod]
-        [ExpectedException(typeof(FileNotFoundException))]
         public async Task AzurePageBlobStorage_Get_notfound()
         {
             var store = CreateStorage();
 
-            await store.Delete("bob");
-            await store.Put("bob", "fred");
-
-            Assert.AreEqual("fred", await store.Get("george"));
-
-            await store.Delete("bob");
-        }
-
-        [TestMethod]
-        [ExpectedException(typeof(FileNotFoundException))]
-        public async Task AzurePageBlobStorage_GetBytes_notfound()
-        {
-            var store = CreateStorage();
-            var encoding = UTF8Encoding.UTF8;
-
-            await store.Delete("bob");
-            await store.Put("bob", "fred");
-
-            var bytes = await store.GetBytes("george");
-            var stripped = bytes.StripNulls();
-
-            Assert.AreEqual("fred", encoding.GetString(stripped.Bytes, 0, stripped.Length));
-
-            await store.Delete("bob");
+            await Assert.ThrowsAsync<FileNotFoundException>(async ()=> await store.Get("george"));
         }
 
         [TestMethod]
@@ -246,7 +222,6 @@ namespace MondoCore.Azure.Storage.FunctionalTests
         }
 
         [TestMethod]
-        [ExpectedException(typeof(FileNotFoundException))]
         public async Task AzurePageBlobStorage_Delete()
         {
             var store = CreateStorage();
@@ -259,7 +234,8 @@ namespace MondoCore.Azure.Storage.FunctionalTests
             await store.Delete("bob");
 
             await Task.Delay(100);
-            Assert.AreEqual("fred", await store.Get("bob"));
+
+            await Assert.ThrowsAsync<FileNotFoundException>(async ()=> await store.Get("bob"));
         }
 
         [TestMethod]
@@ -332,10 +308,10 @@ namespace MondoCore.Azure.Storage.FunctionalTests
 
             Assert.AreEqual(4, result.Count());
 
-            Assert.IsTrue(result.Contains("docs/bio.doc"));
-            Assert.IsTrue(result.Contains("photos/photo.jpg"));
-            Assert.IsTrue(result.Contains("resumes/resume.pdf"));
-            Assert.IsTrue(result.Contains("stuff/portfolio.pdf"));
+            Assert.Contains("docs/bio.doc", result);
+            Assert.Contains("photos/photo.jpg", result);
+            Assert.Contains("resumes/resume.pdf", result);
+            Assert.Contains("stuff/portfolio.pdf", result);
 
             await store.Delete("docs/bio.doc");
             await store.Delete("photos\\photo.jpg");
@@ -366,10 +342,10 @@ namespace MondoCore.Azure.Storage.FunctionalTests
 
             Assert.AreEqual(4, result.Count());
 
-            Assert.IsTrue(result.Contains("docs/bio.doc"));
-            Assert.IsTrue(result.Contains("photos/photo.jpg"));
-            Assert.IsTrue(result.Contains("resumes/resume.pdf"));
-            Assert.IsTrue(result.Contains("stuff/portfolio.pdf"));
+            Assert.Contains("docs/bio.doc", result);
+            Assert.Contains("photos/photo.jpg", result);
+            Assert.Contains("resumes/resume.pdf", result);
+            Assert.Contains("stuff/portfolio.pdf", result);
 
             await store.Delete("docs/bio.doc");
             await store.Delete("photos\\photo.jpg");
@@ -401,10 +377,10 @@ namespace MondoCore.Azure.Storage.FunctionalTests
 
             Assert.AreEqual(4, result.Count());
 
-            Assert.IsTrue(result.Contains("docs/bio.doc"));
-            Assert.IsTrue(result.Contains("photos/photo.jpg"));
-            Assert.IsTrue(result.Contains("resumes/resume.pdf"));
-            Assert.IsTrue(result.Contains("stuff/portfolio.pdf"));
+            Assert.Contains("docs/bio.doc", result);
+            Assert.Contains("photos/photo.jpg", result);
+            Assert.Contains("resumes/resume.pdf", result);
+            Assert.Contains("stuff/portfolio.pdf", result);
 
             await store.Delete("docs/bio.doc");
             await store.Delete("photos/photo.jpg");
@@ -431,19 +407,19 @@ namespace MondoCore.Azure.Storage.FunctionalTests
                 path = path[..path.IndexOf("\\bin")];
             var json = File.ReadAllText(Path.Combine(path, "localhost.json"));
 
-            return JsonConvert.DeserializeObject<Configuration>(json);
+            return JsonConvert.DeserializeObject<Configuration>(json)!;
         }
     }
 
     internal class Configuration
     {
-        public string InstrumentationKey        { get; set; } 
-        public string ConnectionString          { get; set; }
-        public string DataLakeConnectionString  { get; set; }
-        public string ConfigConnectionString    { get; set; }
+        public string InstrumentationKey        { get; set; } = "";
+        public string ConnectionString          { get; set; } = "";
+        public string DataLakeConnectionString  { get; set; } = "";
+        public string ConfigConnectionString    { get; set; } = "";
 
-        public string KeyVaultUri               { get; set; }
-        public string KeyVaultTenantId          { get; set; }
-        public string KeyVaultClientId          { get; set; }
-        public string KeyVaultClientSecret      { get; set; }     
+        public string KeyVaultUri               { get; set; } = "";
+        public string KeyVaultTenantId          { get; set; } = "";
+        public string KeyVaultClientId          { get; set; } = "";
+        public string KeyVaultClientSecret      { get; set; } = "";    
     }    }
