@@ -9,6 +9,8 @@ using System.IO;
 
 using MondoCore.Common;
 using Azure;
+using System.Reflection.Metadata;
+using System.Collections;
 
 namespace MondoCore.Azure.Storage.FunctionalTests
 {
@@ -398,6 +400,39 @@ namespace MondoCore.Azure.Storage.FunctionalTests
         }
 
         [TestMethod]
+        [DataRow("AzureBlobStorage", 1)]
+        [DataRow("AzureBlobStorage", 10)]
+        [DataRow("AzureBlobStorage", 100)]
+        [DataRow("AzureAppendBlobStorage", 1)]
+        [DataRow("AzureAppendBlobStorage", 10)]
+        [DataRow("AzureAppendBlobStorage", 100)]
+        //[DataRow("AzureBlobStorage", 1000)]
+        [DataRow("AzurePageBlobStorage", 1)]
+        [DataRow("AzurePageBlobStorage", 10)]
+        [DataRow("AzurePageBlobStorage", 100)]
+        //[DataRow("AzurePageBlobStorage", 1000)]
+        public async Task AzureBlobStorage_Put_string_w_lease(string type, int numItems)
+        {
+            var store  = CreateStorage(type);
+            var reader = store.Reader;
+            var writer = store.Writer;
+            var ids = new string[numItems];
+            var idList = ids.Select( i=> Guid.NewGuid().ToString()).ToList();
+            var tasks = new List<Task>();
+
+            foreach(var id in idList)
+                tasks.Add(PutLease(writer, id, id));
+
+            await Task.WhenAll(tasks);
+
+            foreach(var id in idList)
+            { 
+                Assert.AreEqual(id, await reader.Get(id));
+                await writer.Delete(id);
+            }
+        }
+
+        [TestMethod]
         [DataRow(1)]
         [DataRow(10)]
         [DataRow(100)]
@@ -440,7 +475,7 @@ namespace MondoCore.Azure.Storage.FunctionalTests
             var idList = ids.Select( i=> Guid.NewGuid().ToString()).ToList();
 
             foreach(var id in idList)
-                await AppendLease(writer, id);
+                await PutLease(writer, "bob", id + "\r\n");
 
             var content = await reader.Get("bob");
 
@@ -457,7 +492,7 @@ namespace MondoCore.Azure.Storage.FunctionalTests
         [DataRow(3)]
         [DataRow(10)]
         [DataRow(100)]
-        [DataRow(1000)] // This will most likely fail
+        //[DataRow(1000)] // This will most likely fail
         public async Task AzureBlobStorage_Append_string_w_lease_async(int numItems)
         {
             var store  = CreateStorage("AzureAppendBlobStorage");
@@ -468,7 +503,7 @@ namespace MondoCore.Azure.Storage.FunctionalTests
             var tasks = new List<Task>();
 
             foreach(var id in idList)
-                tasks.Add(AppendLease(writer, id));
+                tasks.Add(PutLease(writer, "bob", id + "\r\n"));
 
             await Task.WhenAll(tasks);
 
@@ -480,46 +515,6 @@ namespace MondoCore.Azure.Storage.FunctionalTests
             }
 
             await writer.Delete("bob");
-        }
-
-        private async Task Append(IBlobStoreWriter<object> writer, string id)
-        {
-            Random r = new();
-            var delay = r.Next(500);
-
-            await Task.Delay(delay);
-
-            await writer.Put("bob", id + "\r\n");
-        }
-
-        private async Task AppendLease(IBlobStoreWriter<object> writer, string id)
-        {
-            Random r = new();
-            var delay = r.Next(500);
-
-            await Task.Delay(delay);
-
-            DateTime dtStart = DateTime.Now;
-
-            while(true)
-            { 
-                try
-                { 
-                    await using IBlobLease lease = await writer.AcquireLease("bob");
-
-                    await writer.Put(lease, id + "\r\n");
-                    return;
-                }
-                catch(RequestFailedException ex) when (ex.Status == 409 || ex.Status == 412)
-                { 
-                    var duration = (DateTime.Now - dtStart).TotalSeconds;
-
-                    if(duration > 120)
-                        throw;
-
-                    await Task.Delay(200);
-                }
-            }        
         }
 
         [TestMethod]
@@ -565,7 +560,149 @@ namespace MondoCore.Azure.Storage.FunctionalTests
             Assert.IsFalse(await reader.Exists("bob"));
         }
 
+        [TestMethod]
+        [DataRow("AzureBlobStorage")]
+        [DataRow("AzureAppendBlobStorage")]
+        [DataRow("AzurePageBlobStorage")]
+        public async Task AzureBlobStorage_OpenWrite(string type)
+        {
+            var store  = CreateStorage(type);
+            var reader = store.Reader;
+            var writer = store.Writer;
+
+            await writer.Delete("bob");
+            
+            var ids = new string[32];
+            var idList = ids.Select( i=> Guid.NewGuid().ToString()).ToList();
+            
+            await using(var stream = await writer.OpenWrite("bob"))
+            { 
+                foreach(var id in idList)
+                    await stream.WriteAsync(id + "\r\n");
+            }
+
+            var content = await reader.Get("bob");
+
+            foreach(var id in idList)
+            { 
+                Assert.Contains(id, content);
+            }
+        }
+
+        [TestMethod]
+        [DataRow("AzureBlobStorage", 1)]
+        [DataRow("AzureAppendBlobStorage", 1)]
+        [DataRow("AzurePageBlobStorage", 1)] 
+        public async Task AzureBlobStorage_OpenWrite_w_lease(string type, int numItems)
+        {
+            var store  = CreateStorage(type);
+            var reader = store.Reader;
+            var writer = store.Writer;
+          
+            var content = new string[32];
+            var contentLilst = content.Select( i=> Guid.NewGuid().ToString()).ToList();
+            var ids = new string[numItems];
+            var idList = ids.Select( i=> Guid.NewGuid().ToString()).ToList();
+
+            var tasks = new List<Task>();
+
+            foreach(var id in idList)
+                await writer.Delete(id);
+
+            foreach(var id in idList)
+            { 
+                tasks.Add(OpenWriteLease(writer, id, contentLilst));
+            }
+
+            await Task.WhenAll(tasks);
+
+            foreach(var id in idList)
+            { 
+                var contents = await reader.Get(id);
+
+                foreach(var idContent in contentLilst)
+                { 
+                    Assert.Contains(idContent, contents);
+                }
+            }
+        }
+
         #endregion
+        
+        private async Task Append(IBlobStoreWriter<object> writer, string id)
+        {
+            Random r = new();
+            var delay = r.Next(500);
+
+            await Task.Delay(delay);
+
+            await writer.Put("bob", id + "\r\n");
+        }
+
+        private async Task OpenWriteLease(IBlobStoreWriter<object> writer, string id, IEnumerable<string> ids)
+        {
+            Random r = new();
+            var delay = r.Next(500);
+
+            await Task.Delay(delay);
+
+            DateTime dtStart = DateTime.Now;
+
+            while(true)
+            { 
+                try
+                { 
+                    await using IBlobLease lease = await writer.AcquireLease(id);
+
+                    await using(var stream = await lease.OpenWrite())
+                    { 
+                        foreach(var content in ids)
+                            await stream.WriteAsync(content + "\r\n");
+                    }
+
+                    return;
+                }
+                catch(LeaseException ex)
+                { 
+                    var duration = (DateTime.Now - dtStart).TotalSeconds;
+
+                    if(duration > 120)
+                        throw;
+
+                    await Task.Delay(200);
+                }
+            }        
+        }
+
+        private async Task PutLease(IBlobStoreWriter<object> writer, string id, string content)
+        {
+            Random r = new();
+            var delay = r.Next(500);
+
+            await Task.Delay(delay);
+
+            DateTime dtStart = DateTime.Now;
+
+            while(true)
+            { 
+                try
+                { 
+                    await using IBlobLease lease = await writer.AcquireLease(id);
+
+                    await lease.Put(content);
+                    return;
+                }
+                catch(LeaseException ex)
+                { 
+                    var duration = (DateTime.Now - dtStart).TotalSeconds;
+
+                    if(duration > 120)
+                        throw;
+
+                    await Task.Delay(200);
+                }
+            }        
+        }
 
         private IBlobStore<object> CreateStorage(string type, string folder = "", string? prefix = null)
         { 

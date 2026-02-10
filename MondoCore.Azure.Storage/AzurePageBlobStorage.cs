@@ -33,6 +33,8 @@ using AzureBlobs = Azure.Storage.Blobs;
 
 using MondoCore.Common;
 
+using PageBlobWriteStream = MondoCore.Azure.Storage.PageBlobWriteStream;
+
 namespace MondoCore.Azure.Storage
 {
     /****************************************************************************/
@@ -152,7 +154,7 @@ namespace MondoCore.Azure.Storage
             // last write    = 2097152
             public async Task ResizeAsync(long newSize)
             {
-                var position = this.Stream!.Output.Position;
+                var position = this.Stream!.Output!.Position;
 
                 this.Stream.Output.Dispose();
 
@@ -169,9 +171,9 @@ namespace MondoCore.Azure.Storage
 
             public void Resize(long newSize)
             {
-                var position = this.Stream!.Output.Position;
+                var position = this.Stream!.Output!.Position;
 
-               this.Stream.Output.Dispose();
+                this.Stream.Output.Dispose();
 
                 _client.Resize(newSize);
 

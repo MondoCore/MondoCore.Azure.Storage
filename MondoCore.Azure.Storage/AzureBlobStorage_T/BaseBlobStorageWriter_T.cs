@@ -19,6 +19,7 @@
 
 using System;
 using System.IO;
+using System.Reflection.Metadata;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -34,29 +35,23 @@ namespace MondoCore.Azure.Storage
     /// <summary>
     /// Base class for Azure blob storage writer 
     /// </summary>
-    public abstract class BaseBlobStorageWriter<T>(BaseBlobStorage<T> store) : IBlobStoreWriter<T>
+    public abstract class BaseBlobStorageWriter<T>(BaseBlobStorage<T> store, AzureStorageRetryPolicy? retryPolicy) : IBlobStoreWriter<T>
     {
         #region IBlobStoreWriter<T>
 
         /// <inheritdoc/>
         public Task<Stream> OpenWrite(string id, CancellationToken cancellationToken = default)
         {
-            return OpenWriteInternal(async ()=> (await store.GetBlobClient(id).ConfigureAwait(false), null), cancellationToken: cancellationToken);
+            return OpenWriteInternal(async ()=> (await store.GetBlobClient(id).ConfigureAwait(false), null), id, cancellationToken: cancellationToken);
         }
 
         /// <inheritdoc/>
-        public Task<Stream> OpenWrite(IBlobLease lease, CancellationToken cancellationToken = default)
+        public async Task Put(string id, Stream contents, CancellationToken cancellationToken = default)
         {
-            var blobLease = lease as BlobLease<T>;
+            var blob = await store.GetBlobClient(id).ConfigureAwait(false);
 
-            return OpenWriteInternal(()=> Task.FromResult((blobLease!.BlobClient!, (string?)blobLease.LeaseId)), cancellationToken: cancellationToken);
+            await Put(()=> Task.FromResult((blob!, (string?)null)), contents, cancellationToken: cancellationToken);
         }
-
-        /// <inheritdoc/>
-        public abstract Task Put(string id, Stream contents, CancellationToken cancellationToken = default);
-
-        /// <inheritdoc/>
-        public abstract Task Put(IBlobLease lease, Stream contents, CancellationToken cancellationToken = default);
 
         /// <inheritdoc/>
         public Task Delete(string id, CancellationToken cancellationToken = default)
@@ -65,18 +60,10 @@ namespace MondoCore.Azure.Storage
         }
 
         /// <inheritdoc/>
-        public Task Delete(IBlobLease lease, CancellationToken cancellationToken = default)
-        {
-            var blobLease = lease as BlobLease<T>;
-
-            return Delete(()=> Task.FromResult((blobLease!.BlobClient!, (string?)blobLease.LeaseId)), cancellationToken: cancellationToken);
-        }
-
-        /// <inheritdoc/>
-        public async Task<IBlobLease> AcquireLease(string id, bool createIfNotExists = true, CancellationToken cancellationToken = default)
+        public virtual async Task<IBlobLease> AcquireLease(string id, bool createIfNotExists = true, CancellationToken cancellationToken = default)
         {
             var  lease = new BlobLease<T>(store, this);
-            int retry = 5;
+            int  retry = retryPolicy?.MaxRetries ?? 0;
 
             while(true)
             { 
@@ -87,10 +74,13 @@ namespace MondoCore.Azure.Storage
                 }
                 catch(RequestFailedException ex) when (ex.Status == 409 || ex.Status == 412)
                 { 
-                    if(retry-- <= 0)
-                        throw;
+                    if(retryPolicy == null || retryPolicy!.MaxRetries == 0)
+                        throw new LeaseException(ex);
 
-                    await Task.Delay(50);
+                    if(retry-- <= 0)
+                        throw new LeaseException(ex);
+
+                    await Task.Delay(retryPolicy.Delay);
                 }
             }
         }
@@ -99,30 +89,33 @@ namespace MondoCore.Azure.Storage
 
         #region Protected
 
-        protected internal abstract Task<Stream> OpenWrite(BlobBaseClient client, string? leaseId, CancellationToken cancellationToken);
+        protected internal abstract Task<Stream> OpenWrite(BlobBaseClient client, string id, string? leaseId, CancellationToken cancellationToken);
 
         #endregion
 
         #region Private
 
-        private async Task<Stream> OpenWriteInternal(Func<Task<(BlobBaseClient Client, string? LeaseId)>> getBlob, CancellationToken cancellationToken = default)
+        internal abstract Task Put(Func<Task<(BlobBaseClient Client, string? LeaseId)>> getBlob, Stream contents, CancellationToken cancellationToken = default);
+        
+        internal async Task<Stream> OpenWriteInternal(Func<Task<(BlobBaseClient Client, string? LeaseId)>> getBlob, string id, CancellationToken cancellationToken = default)
         {
             try
             { 
                 var blob = await getBlob();
 
-                return await OpenWrite(blob.Client, blob.LeaseId, cancellationToken).ConfigureAwait(false);
+                return await OpenWrite(blob.Client, id, blob.LeaseId, cancellationToken).ConfigureAwait(false);
             }
-            catch(RequestFailedException ex)
+            catch(RequestFailedException ex) when (ex.Status == 404)
             {
-                if(ex.Status == 404)
-                    throw new FileNotFoundException("Blob not found", ex);
-
-                throw;
+                throw new FileNotFoundException("Blob not found", ex);
+            }
+            catch(RequestFailedException ex) when (ex.Status == 409 || ex.Status == 412)
+            {
+                throw new LeaseException(ex);
             }
         }
 
-        private async Task Delete(Func<Task<(BlobBaseClient Client, string? LeaseId)>> getBlob, CancellationToken cancellationToken = default)
+        internal async Task Delete(Func<Task<(BlobBaseClient Client, string? LeaseId)>> getBlob, CancellationToken cancellationToken = default)
         {
             try
             { 
@@ -138,6 +131,10 @@ namespace MondoCore.Azure.Storage
             { 
                 throw new UnauthorizedAccessException("Blob not accessible", ex);
             }
+            catch(RequestFailedException ex) when (ex.Status == 409 || ex.Status == 412)
+            {
+                throw new LeaseException(ex);
+            }
         }
 
         internal virtual Task CreateIfNotExists(BlobBaseClient blob, string? leaseId, CancellationToken cancellationToken)
@@ -147,33 +144,5 @@ namespace MondoCore.Azure.Storage
         }
 
         #endregion   
-    }
-
-    internal class BlobLease<T>(BaseBlobStorage<T> store, BaseBlobStorageWriter<T> writer) : IBlobLease
-    {
-        private BlobLeaseClient? _leaseClient;
-
-        public async ValueTask DisposeAsync()
-        {
-            if(_leaseClient != null)
-                await _leaseClient!.ReleaseAsync();
-        }
-
-        internal BlobBaseClient? BlobClient { get; private set; }
-        internal string          LeaseId    { get; private set; } = "";
-
-        internal async Task Acquire(string id, bool createIfNotExists, CancellationToken cancellationToken)
-        {
-            LeaseId = Guid.NewGuid().ToString();
-
-            this.BlobClient = await store.GetBlobClient(id, createIfNotExists).ConfigureAwait(true);
-
-            if(createIfNotExists)
-                await writer.CreateIfNotExists(this.BlobClient, this.LeaseId, cancellationToken);
-
-            _leaseClient = this.BlobClient.GetBlobLeaseClient(this.LeaseId);
-
-            await _leaseClient.AcquireAsync(TimeSpan.FromSeconds(-1)).ConfigureAwait(true);
-        }
     }
 }

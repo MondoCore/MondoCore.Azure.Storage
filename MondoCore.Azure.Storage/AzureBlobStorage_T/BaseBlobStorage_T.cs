@@ -94,4 +94,15 @@ namespace MondoCore.Azure.Storage
 
         #endregion
     }
+    
+    /****************************************************************************/
+    /****************************************************************************/
+    /// <summary>
+    /// Retry policy
+    /// </summary>
+    public class AzureStorageRetryPolicy
+    {
+        public int MaxRetries { get; set; } = 5;
+        public int Delay      { get; set; } = 50; // Milliseconds
+    }
 }

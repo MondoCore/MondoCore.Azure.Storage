@@ -22,6 +22,7 @@ using System.IO;
 using System.Threading.Tasks;
 
 using Azure.Core;
+using Azure.Core.Pipeline;
 using Azure.Storage.Blobs.Specialized;
 
 using MondoCore.Common;
@@ -35,12 +36,16 @@ namespace MondoCore.Azure.Storage
     /// </summary>
     public class AzureAppendBlobStorage<T> : BaseBlobStorage<T>
     {
-        public AzureAppendBlobStorage(string connectionString, string blobContainerName) : base(connectionString, blobContainerName)
+        private AzureStorageRetryPolicy? _retryPolicy;
+
+        public AzureAppendBlobStorage(string connectionString, string blobContainerName, AzureStorageRetryPolicy? retryPolicy = null) : base(connectionString, blobContainerName)
         {
+            _retryPolicy = retryPolicy;
         }
 
-        public AzureAppendBlobStorage(Uri uri, TokenCredential credential, string path) : base(uri, credential, path)
+        public AzureAppendBlobStorage(Uri uri, TokenCredential credential, string path, AzureStorageRetryPolicy? retryPolicy = null) : base(uri, credential, path)
         {
+            _retryPolicy = retryPolicy;
         }
 
         #region BaseBlobStorage
@@ -48,7 +53,7 @@ namespace MondoCore.Azure.Storage
         public override IBlobStoreReader<T> Reader => new AzureAppendBlobStorageReader<T>(this);
 
         /// <inheritdoc/>
-        public override IBlobStoreWriter<T> Writer => new AzureAppendBlobStorageWriter<T>(this);
+        public override IBlobStoreWriter<T> Writer => new AzureAppendBlobStorageWriter<T>(this, _retryPolicy);
 
         /// <inheritdoc/>
         public override ValueTask DisposeAsync()
@@ -77,5 +82,5 @@ namespace MondoCore.Azure.Storage
         }
 
         #endregion
-    }
+    }    
 }

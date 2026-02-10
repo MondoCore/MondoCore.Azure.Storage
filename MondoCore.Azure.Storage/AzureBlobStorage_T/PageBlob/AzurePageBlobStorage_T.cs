@@ -5,7 +5,7 @@
  *        Namespace: MondoCore.Azure.Storage				            
  *             File: AzurePageBlobStorage_T.cs			 		    		    
  *        Class(es): AzurePageBlobStorage <T>			           		        
- *          Purpose: Class for page blob storage in Azure Storge                           
+ *          Purpose: Class for page blob storage in Azure Storage                           
  *                                                                          
  *  Original Author: Jim Lightfoot                                          
  *    Creation Date: 4 Feb 2026                                             

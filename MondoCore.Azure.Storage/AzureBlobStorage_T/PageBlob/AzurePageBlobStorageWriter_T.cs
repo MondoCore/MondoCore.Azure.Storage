@@ -35,38 +35,30 @@ namespace MondoCore.Azure.Storage
     /// <summary>
     /// Class to perform write operations on a Azure page blob account   
     /// </summary>
-    public class AzurePageBlobStorageWriter<T>(AzurePageBlobStorage<T> store) : BaseBlobStorageWriter<T>(store)
+    public class AzurePageBlobStorageWriter<T>(AzurePageBlobStorage<T> store, AzureStorageRetryPolicy? retryPolicy = null) : BaseBlobStorageWriter<T>(store, retryPolicy)
     {
         internal const int PageSize = 512;
         internal const int MaxWrite = 1024 * 1024 * 4;
 
-        #region IBlobStoreWriter<T>
-
-        /// <inheritdoc/>
-        public override async Task Put(string id, Stream contents, CancellationToken cancellationToken = default)
-        {
-            var blob = (await store.GetBlobClient(id).ConfigureAwait(false)) as PageBlobClient;
-
-            await Put(()=> Task.FromResult((blob!, (string?)null)), contents, cancellationToken: cancellationToken);
-        }
-
-        /// <inheritdoc/>
-        public override Task Put(IBlobLease lease, Stream contents, CancellationToken cancellationToken = default)
-        {
-            var blobLease = lease as BlobLease<T>;
-
-            return Put(()=> Task.FromResult(((blobLease!.BlobClient! as PageBlobClient)!, (string?)blobLease.LeaseId)), contents, cancellationToken: cancellationToken);
-        }
-        #endregion
-
         #region Protected
 
-        protected internal override async Task<Stream> OpenWrite(BlobBaseClient client, string? leaseId, CancellationToken cancellationToken)
+        protected internal override async Task<Stream> OpenWrite(BlobBaseClient client, string id, string? leaseId, CancellationToken cancellationToken)
         {
             // ??? need to make PageBlobWriteStream,Output be a prop so I can reset with a new call to OpenWriteAsync after resizing
-            var sizeable = new PageBlobSizeable((client as PageBlobClient)!);
-            var storStrm = await ((client as PageBlobClient)!).OpenWriteAsync(true, 0L, new PageBlobOpenWriteOptions { Size = PageSize }, cancellationToken).ConfigureAwait(false);
-            var stream   = new PageBlobWriteStream(storStrm, sizeable);
+            var sizeable = new PageBlobSizeable<T>((client as PageBlobClient)!);
+            var storStrm = await ((client as PageBlobClient)!).OpenWriteAsync
+            (
+                true, 
+                0L, 
+                new PageBlobOpenWriteOptions 
+                { 
+                    Size = PageSize, 
+                    OpenConditions = leaseId == null ? null : new PageBlobRequestConditions { LeaseId = leaseId } 
+                }, 
+                cancellationToken
+            ).ConfigureAwait(false);
+
+            var stream = new PageBlobWriteStream<T>(storStrm, sizeable!, leaseId);
 
             sizeable.Stream = stream;
 
@@ -87,15 +79,26 @@ namespace MondoCore.Azure.Storage
             await (blob as PageBlobClient)!.CreateIfNotExistsAsync(PageSize, createOptions, cancellationToken).ConfigureAwait(false);
         }
 
-        private async Task Put(Func<Task<(PageBlobClient Client, string? LeaseId)>> getBlob, Stream contents, CancellationToken cancellationToken = default)
+        internal override async Task Put(Func<Task<(BlobBaseClient Client, string? LeaseId)>> getBlob, Stream contents, CancellationToken cancellationToken = default)
         {
             try
             { 
                 var blob         = await getBlob();
                 var len          = contents.Length;
                 var adjustedSize = (int)(Math.Ceiling((double)len / (double)PageSize) * PageSize);
+                var pageClient   = blob.Client as PageBlobClient;
 
-                using(var strm = await blob.Client.OpenWriteAsync(false, 0L, new PageBlobOpenWriteOptions { Size = adjustedSize }, cancellationToken).ConfigureAwait(false))
+                using(var strm = await pageClient!.OpenWriteAsync
+                                 (
+                                     false, 
+                                     0L, 
+                                     new PageBlobOpenWriteOptions 
+                                     { 
+                                         Size = adjustedSize, 
+                                         OpenConditions = blob.LeaseId == null ? null : new PageBlobRequestConditions { LeaseId = blob.LeaseId }  
+                                     }, 
+                                     cancellationToken
+                                 ).ConfigureAwait(false))
                 {
                     var buffer = new byte[MaxWrite];
                     var read   = 0L;
@@ -125,13 +128,17 @@ namespace MondoCore.Azure.Storage
             { 
                 throw new UnauthorizedAccessException("Blob not accessible", ex);
             }
+            catch(RequestFailedException ex) when (ex.Status == 409 || ex.Status == 412)
+            {
+                throw new LeaseException(ex);
+            }
         }
 
         #endregion
 
         #region ISizeable
 
-        private class PageBlobSizeable : ISizeable
+        private class PageBlobSizeable<TS> : ISizeable<TS>
         {
             private long _size = PageSize;
             private readonly PageBlobClient _client;
@@ -142,39 +149,26 @@ namespace MondoCore.Azure.Storage
             }
 
             public long Size => _size;
-            internal PageBlobWriteStream? Stream { get; set; }
+            internal PageBlobWriteStream<T>? Stream { get; set; }
 
-            // total length  = 18874368
-            // last position = 16777216
-            // last write    = 2097152
-            public async Task ResizeAsync(long newSize)
+            public async Task ResizeAsync(long newSize, string? leaseId, CancellationToken cancellationToken)
             {
-                var position = this.Stream!.Output.Position;
+                var position = this.Stream!.Output!.Position;
 
-                this.Stream.Output.Dispose();
+                await this.Stream.Output.DisposeAsync();
+                var options = new PageBlobRequestConditions { LeaseId = leaseId };
 
-                await _client.ResizeAsync(newSize).ConfigureAwait(false);
+                await _client.ResizeAsync(newSize, options, cancellationToken).ConfigureAwait(false);
 
                 _size = newSize;
 
-                var storStrm = await _client.OpenWriteAsync(false, position).ConfigureAwait(false);
+                var openWriteOptions = new PageBlobOpenWriteOptions 
+                { 
+                    Size = newSize, 
+                    OpenConditions = leaseId == null ? null : new PageBlobRequestConditions { LeaseId = leaseId } 
+                };
 
-                this.Stream.Output = storStrm;
-
-                return;
-            }
-
-            public void Resize(long newSize)
-            {
-                var position = this.Stream!.Output.Position;
-
-               this.Stream.Output.Dispose();
-
-                _client.Resize(newSize);
-
-                _size = newSize;
-
-                var storStrm = _client.OpenWrite(false, position);
+                var storStrm = await _client.OpenWriteAsync(false, position, openWriteOptions).ConfigureAwait(false);
 
                 this.Stream.Output = storStrm;
 

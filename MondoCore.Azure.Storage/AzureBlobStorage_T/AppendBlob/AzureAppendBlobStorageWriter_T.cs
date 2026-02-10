@@ -23,6 +23,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Azure;
+using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
 using Azure.Storage.Blobs.Specialized;
 using Microsoft.Identity.Client;
@@ -35,28 +36,17 @@ namespace MondoCore.Azure.Storage
     /// <summary>
     /// Performs write operations on a Azure append blob storage account 
     /// </summary>
-    public class AzureAppendBlobStorageWriter<T>(AzureAppendBlobStorage<T> store) : BaseBlobStorageWriter<T>(store)
+    public class AzureAppendBlobStorageWriter<T>(AzureAppendBlobStorage<T> store, AzureStorageRetryPolicy? retryPolicy = null) : BaseBlobStorageWriter<T>(store, retryPolicy)
     {
         /// <inheritdoc/>
-        public override async Task Put(string id, Stream contents, CancellationToken cancellationToken = default)
+        protected internal override Task<Stream> OpenWrite(BlobBaseClient client, string id, string? leaseId, CancellationToken cancellationToken)
         {
-            var blob = (await store.GetBlobClient(id).ConfigureAwait(false)) as AppendBlobClient;
+            var options = new AppendBlobOpenWriteOptions { };
 
-            await Put(()=> Task.FromResult((blob!, (string?)null)), contents, cancellationToken: cancellationToken);
-        }
+            if(leaseId != null)
+                options.OpenConditions = new AppendBlobRequestConditions { LeaseId = leaseId };
 
-        /// <inheritdoc/>
-        public override Task Put(IBlobLease lease, Stream contents, CancellationToken cancellationToken = default)
-        {
-            var blobLease = lease as BlobLease<T>;
-
-            return Put(()=> Task.FromResult(((blobLease!.BlobClient! as AppendBlobClient)!, (string?)blobLease.LeaseId)), contents, cancellationToken: cancellationToken);
-        }
-
-        /// <inheritdoc/>
-        protected internal override Task<Stream> OpenWrite(BlobBaseClient client, string? leaseId, CancellationToken cancellationToken)
-        {
-            throw new NotSupportedException("Cannot open a write stream on this type of Azure Blob Storage. Use AzurePageBlobStorage.");
+            return (client as AppendBlobClient)!.OpenWriteAsync(true, options, cancellationToken: cancellationToken);
         }
 
         #region Private
@@ -71,12 +61,13 @@ namespace MondoCore.Azure.Storage
             await (blob as AppendBlobClient)!.CreateIfNotExistsAsync(createOptions, cancellationToken).ConfigureAwait(false);
         }
 
-        private async Task Put(Func<Task<(AppendBlobClient Client, string? LeaseId)>> getBlob, Stream contents, CancellationToken cancellationToken = default)
+        internal override async Task Put(Func<Task<(BlobBaseClient Client, string? LeaseId)>> getBlob, Stream contents, CancellationToken cancellationToken = default)
         {
             try
             { 
                 var blob    = await getBlob();
                 var options = new AppendBlobAppendBlockOptions { };
+                var appendClient = blob.Client as AppendBlobClient;
 
                 // The lease will create
                 if(blob.LeaseId == null)
@@ -84,7 +75,7 @@ namespace MondoCore.Azure.Storage
                 else
                     options.Conditions = new AppendBlobRequestConditions { LeaseId = blob.LeaseId };
 
-                await blob.Client!.AppendBlockAsync(contents, options, cancellationToken).ConfigureAwait(false);
+                await appendClient!.AppendBlockAsync(contents, options, cancellationToken).ConfigureAwait(false);
 
                 return;
             }
@@ -95,6 +86,10 @@ namespace MondoCore.Azure.Storage
             catch(RequestFailedException ex2) when (ex2.Status == 401)
             { 
                 throw new UnauthorizedAccessException("Blob not accessible", ex2);
+            }
+            catch(RequestFailedException ex) when (ex.Status == 409 || ex.Status == 412)
+            {
+                throw new LeaseException(ex);
             }
         }
 
